@@ -11,12 +11,18 @@ import {
 import * as Font from "expo-font";
 import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 
 const HomeScreen = () => {
   const [fontLoaded, setFontLoaded] = useState(false);
   const today = new Date();
-  const [selectedDay, setSelectedDay] = useState(today.getDate());
+  const formatDate = (date) => {
+    return moment(date).format("DD/MM/YYYY");
+  };
+  const [selectedDay, setSelectedDay] = useState(formatDate(today));
   const [refreshing, setRefreshing] = useState(false);
+  const [taskCounts, setTaskCounts] = useState({ total: 0, completed: 0 });
+  const [showDialog, setShowDialog] = useState(false);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -25,25 +31,32 @@ const HomeScreen = () => {
     }, 2000);
   };
 
-  const calculateTimeLeft = (startTime) => {
+  const calculateTimeLeft = (startTime, taskDate) => {
     const currentTime = moment();
     const startTimeMoment = moment(startTime, "h:mm A");
-    const duration = moment.duration(startTimeMoment.diff(currentTime));
+    const taskDateTime = moment(
+      taskDate + " " + startTime,
+      "DD/MM/YYYY h:mm A"
+    );
+    if (!taskDateTime.isSame(currentTime, "day")) {
+      return "In Progress";
+    }
 
+    const duration = moment.duration(taskDateTime.diff(currentTime));
+
+    // If the task time has already passed
     if (duration.asMilliseconds() <= 0) {
       return "Incomplete";
     }
 
-    const hours = duration.hours();
-    const minutes = duration.minutes();
-
-    if (hours === 0) {
+    // If less than an hour is left and it is today
+    if (duration.asMinutes() < 60) {
+      const minutes = duration.minutes();
       return `${minutes} min`;
-    } else if (minutes === 0) {
-      return `${hours} hr`;
-    } else {
-      return `${hours} hr ${minutes} min`;
     }
+
+    // Default to "In Progress" if more than an hour left
+    return "In Progress";
   };
 
   const days = [];
@@ -58,13 +71,12 @@ const HomeScreen = () => {
   }
 
   const [tasks, setTasks] = useState({
-    [today.getDate()]: [
+    "11/05/2024": [
       {
         id: 1,
         title: "Robin Buenos",
         subtitle: "Create personas through user research and data",
-        startTime: "2:00 PM", // Example time
-        progress: "89%",
+        startTime: "2:00 PM",
         done: false,
         timeLeft: "2 hours",
       },
@@ -72,22 +84,67 @@ const HomeScreen = () => {
         id: 2,
         title: "John De Palace",
         subtitle: "Developing wireframes and task flows based on user needs",
-        startTime: "1:00 PM", // Example time
-        progress: "100%",
+        startTime: "1:00 PM",
         done: false,
         timeLeft: "3 hours",
       },
       {
-        id: 1,
+        id: 3,
         title: "Birthday party",
         subtitle: "Create personas through user research and data",
-        startTime: "4:00 PM", // Example time
-        progress: "89%",
+        startTime: "4:00 PM",
+        done: false,
+        timeLeft: "2 hours",
+      },
+      {
+        id: 8,
+        title: "Birthday party",
+        subtitle: "Create personas through user research and data",
+        startTime: "7:00 PM",
+        done: false,
+        timeLeft: "2 hours",
+      },
+      {
+        id: 9,
+        title: "S*x",
+        subtitle: "Create personas through user research and data",
+        startTime: "6:00 PM",
         done: false,
         timeLeft: "2 hours",
       },
     ],
+    "12/05/2024": [
+      {
+        id: 4,
+        title: "Meeting with client",
+        subtitle: "Discuss project requirements and timeline",
+        startTime: "10:00 AM",
+        done: false,
+        timeLeft: "1 hour",
+      },
+      {
+        id: 5,
+        title: "Design review",
+        subtitle: "Review and provide feedback on design mockups",
+        startTime: "2:30 PM",
+        done: false,
+        timeLeft: "1 hour 30 minutes",
+      },
+    ],
   });
+
+    const sortTasksByTime = (taskArray) => {
+    return taskArray.sort((a, b) => moment(a.startTime, "h:mm A").diff(moment(b.startTime, "h:mm A")));
+  };
+
+  useEffect(() => {
+    const sortedTasks = {};
+    Object.keys(tasks).forEach(day => {
+      sortedTasks[day] = sortTasksByTime([...tasks[day]]);
+    });
+    setTasks(sortedTasks);
+  }, []);
+
 
   const [borderAnimations, setBorderAnimations] = useState({});
   const getAnimatedValue = (id) => {
@@ -116,15 +173,71 @@ const HomeScreen = () => {
 
   const handleMarkDone = (day, id) => {
     const updatedTasks = { ...tasks };
+    let completedTasks = 0;
+
     updatedTasks[day] = updatedTasks[day].map((task) => {
       if (task.id === id) {
         const newDoneState = !task.done;
         animateBorder(id, newDoneState ? 1 : 0);
         return { ...task, done: newDoneState };
       }
+      if (task.done) completedTasks++;
       return task;
     });
+
+    const totalTasks = updatedTasks[day].length;
+    const newCompletedTasks = tasks[day].find((task) => task.id === id)?.done
+      ? completedTasks - 1
+      : completedTasks + 1;
+
+    setTaskCounts({ total: totalTasks, completed: newCompletedTasks });
+
+    // Show dialog if all tasks are done
+    if (newCompletedTasks === totalTasks) {
+      setShowDialog(true);
+    }
+
     setTasks(updatedTasks);
+  };
+
+  const TaskCompletionDialog = ({ visible, onClose, taskCounts }) => {
+    const animation = useRef(new Animated.Value(-100)).current; // Assuming the dialog's height is about 100
+
+    useEffect(() => {
+      if (visible) {
+        Animated.sequence([
+          Animated.timing(animation, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.delay(3000), // Dialog stays visible for 3 seconds
+          Animated.timing(animation, {
+            toValue: -100,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start(() => onClose()); // Automatically close the dialog after animation
+      }
+    }, [visible]);
+
+    if (!visible) return null;
+
+    return (
+      <Animated.View
+        style={[
+          styles.dialogContainer,
+          { transform: [{ translateY: animation }] },
+        ]}
+      >
+        <View style={styles.dialog}>
+          <Text style={styles.dialogMessage}>
+            You have completed {taskCounts.completed}/{taskCounts.total} tasks
+            today
+          </Text>
+        </View>
+      </Animated.View>
+    );
   };
 
   useEffect(() => {
@@ -172,12 +285,21 @@ const HomeScreen = () => {
           {days.map((day, index) => (
             <TouchableOpacity
               key={index}
-              onPress={() => setSelectedDay(day.date)}
+              onPress={() =>
+                setSelectedDay(
+                  formatDate(
+                    new Date(today.getFullYear(), today.getMonth(), day.date)
+                  )
+                )
+              }
             >
               <View
                 style={[
                   styles.dayContainer,
-                  selectedDay === day.date
+                  selectedDay ===
+                  formatDate(
+                    new Date(today.getFullYear(), today.getMonth(), day.date)
+                  )
                     ? styles.selectedDayContainer
                     : styles.unselectedDayContainer,
                 ]}
@@ -185,7 +307,10 @@ const HomeScreen = () => {
                 <Text
                   style={[
                     styles.day,
-                    selectedDay === day.date
+                    selectedDay ===
+                    formatDate(
+                      new Date(today.getFullYear(), today.getMonth(), day.date)
+                    )
                       ? styles.selectedDayText
                       : styles.unselectedDayText,
                   ]}
@@ -206,8 +331,9 @@ const HomeScreen = () => {
             inputRange: [0, 1],
             outputRange: ["white", "#87FF21"],
           });
-          const timeLeft = calculateTimeLeft(task.startTime);
+          const timeLeft = calculateTimeLeft(task.startTime, selectedDay);
           const isTimeMissed = timeLeft === "Incomplete";
+          const isInProgress = timeLeft === "In Progress";
           return (
             <Animated.View
               key={index}
@@ -216,12 +342,10 @@ const HomeScreen = () => {
                 { borderColor: borderColor, borderWidth: 0.5 },
               ]}
             >
-              {/* Delete Button */}
               <View style={styles.taskHeader}>
                 <View style={styles.startTimeContainer}>
                   <Text style={styles.taskStart}>{task.startTime}</Text>
                 </View>
-                {/* Delete Button */}
                 <TouchableOpacity
                   style={styles.deleteButton}
                   onPress={() => handleRemoveTask(selectedDay, task.id)}
@@ -235,12 +359,15 @@ const HomeScreen = () => {
                 <Text
                   style={[
                     styles.taskTime,
-                    isTimeMissed ? styles.taskTimeMissed : styles.taskTimeLeft,
+                    isTimeMissed
+                      ? styles.taskTimeMissed
+                      : isInProgress
+                      ? styles.taskTimeInProgress
+                      : styles.taskTimeLeft,
                   ]}
                 >
                   {timeLeft}
                 </Text>
-                <Text style={styles.taskProgress}>{task.progress}</Text>
                 {/* Done Button */}
                 <TouchableOpacity
                   style={[
@@ -258,6 +385,11 @@ const HomeScreen = () => {
           );
         })}
       </ScrollView>
+      <TaskCompletionDialog
+        visible={showDialog}
+        onClose={() => setShowDialog(false)}
+        taskCounts={taskCounts}
+      />
     </View>
   );
 };
@@ -267,13 +399,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
     paddingHorizontal: 16,
-    paddingTop: 50,
+    paddingTop: 30,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 10,
   },
   greeting: {
     color: "#FFFFFF",
@@ -390,11 +522,38 @@ const styles = StyleSheet.create({
     fontFamily: "Mona-Sans",
   },
   taskTimeLeft: {
-    color: "#87FF21",
+    color: "#FFFF00",
   },
   taskTimeMissed: {
     color: "#FF6347",
   },
+  taskTimeInProgress: {
+    color: "#FFFFFF",
+  },
+
+  dialogContainer: {
+    position: "absolute",
+    justifyContent: "center",
+    alignItems: "center",
+    top: 15,
+    left: 0,
+    right: 0,
+  },
+  dialog: {
+    backgroundColor: "#000",
+    padding: 3,
+    borderRadius: 100,
+    width: "80%",
+    alignItems: "center",
+    borderWidth: 0.4,
+    borderColor: '#fff'
+  },
+  dialogMessage: {
+    fontSize: 14,
+    marginVertical: 15,
+    color: "#fff",
+  },
+
 });
 
 export default HomeScreen;
