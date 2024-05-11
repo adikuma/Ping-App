@@ -7,13 +7,18 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
+  TextInput,
 } from "react-native";
 import * as Font from "expo-font";
 import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { TouchableWithoutFeedback, Keyboard } from "react-native";
+import { useNavigation } from '@react-navigation/native';
 
 const HomeScreen = () => {
+  const navigation = useNavigation();
   const [fontLoaded, setFontLoaded] = useState(false);
   const today = new Date();
   const formatDate = (date) => {
@@ -23,6 +28,9 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [taskCounts, setTaskCounts] = useState({ total: 0, completed: 0 });
   const [showDialog, setShowDialog] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [currentTaskId, setCurrentTaskId] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -44,18 +52,15 @@ const HomeScreen = () => {
 
     const duration = moment.duration(taskDateTime.diff(currentTime));
 
-    // If the task time has already passed
     if (duration.asMilliseconds() <= 0) {
       return "Incomplete";
     }
 
-    // If less than an hour is left and it is today
     if (duration.asMinutes() < 60) {
       const minutes = duration.minutes();
       return `${minutes} min`;
     }
 
-    // Default to "In Progress" if more than an hour left
     return "In Progress";
   };
 
@@ -133,18 +138,48 @@ const HomeScreen = () => {
     ],
   });
 
-    const sortTasksByTime = (taskArray) => {
-    return taskArray.sort((a, b) => moment(a.startTime, "h:mm A").diff(moment(b.startTime, "h:mm A")));
+  const renderTimePicker = () => {
+    if (showTimePicker) {
+      return (
+        <DateTimePicker
+          value={new Date()}
+          mode="time"
+          is24Hour={false}
+          display="default"
+          onChange={onTimeChange}
+          themeVariant="dark"
+        />
+      );
+    }
+    return null;
   };
 
-  useEffect(() => {
-    const sortedTasks = {};
-    Object.keys(tasks).forEach(day => {
-      sortedTasks[day] = sortTasksByTime([...tasks[day]]);
-    });
-    setTasks(sortedTasks);
-  }, []);
+  const onTimeChange = (event, selectedTime) => {
+    setShowTimePicker(false);
+    console.log("Event: ", event);
+    if (event.type === "set" && selectedTime !== undefined) {
+      const newTime = moment(selectedTime).format("h:mm A");
+      setTasks((prevTasks) => {
+        const updatedTasks = {
+          ...prevTasks,
+          [selectedDay]: prevTasks[selectedDay].map((task) =>
+            task.id === currentTaskId ? { ...task, startTime: newTime } : task
+          ),
+        };
+        return sortTasks(updatedTasks);
+      });
+    }
+  };
 
+  const sortTasks = (tasks) => {
+    const sortedTasks = { ...tasks };
+    Object.keys(sortedTasks).forEach((day) => {
+      sortedTasks[day] = sortedTasks[day].sort((a, b) =>
+        moment(a.startTime, "h:mm A").diff(moment(b.startTime, "h:mm A"))
+      );
+    });
+    return sortedTasks;
+  };
 
   const [borderAnimations, setBorderAnimations] = useState({});
   const getAnimatedValue = (id) => {
@@ -192,7 +227,6 @@ const HomeScreen = () => {
 
     setTaskCounts({ total: totalTasks, completed: newCompletedTasks });
 
-    // Show dialog if all tasks are done
     if (newCompletedTasks === totalTasks) {
       setShowDialog(true);
     }
@@ -201,7 +235,7 @@ const HomeScreen = () => {
   };
 
   const TaskCompletionDialog = ({ visible, onClose, taskCounts }) => {
-    const animation = useRef(new Animated.Value(-100)).current; // Assuming the dialog's height is about 100
+    const animation = useRef(new Animated.Value(-100)).current;
 
     useEffect(() => {
       if (visible) {
@@ -211,15 +245,15 @@ const HomeScreen = () => {
             duration: 300,
             useNativeDriver: true,
           }),
-          Animated.delay(3000), // Dialog stays visible for 3 seconds
+          Animated.delay(3000),
           Animated.timing(animation, {
             toValue: -100,
             duration: 300,
             useNativeDriver: true,
           }),
-        ]).start(() => onClose()); // Automatically close the dialog after animation
+        ]).start(() => onClose());
       }
-    }, [visible]);
+    }, [visible, onClose]);
 
     if (!visible) return null;
 
@@ -238,6 +272,21 @@ const HomeScreen = () => {
         </View>
       </Animated.View>
     );
+  };
+
+  const handleEndEditing = () => {
+    if (editingTask) {
+      setTasks((prevTasks) => {
+        const updatedTasks = {
+          ...prevTasks,
+          [selectedDay]: prevTasks[selectedDay].map((task) =>
+            task.id === editingTask.id ? { ...task, ...editingTask } : task
+          ),
+        };
+        return updatedTasks;
+      });
+      setEditingTask(null);
+    }
   };
 
   useEffect(() => {
@@ -261,7 +310,7 @@ const HomeScreen = () => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.hello}>Hello Aditya,</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('VoiceAssistant')}>
           <Ionicons
             name="add"
             size={24}
@@ -325,71 +374,132 @@ const HomeScreen = () => {
       </View>
 
       {/* Task Cards */}
+      {/* Task Cards */}
       <ScrollView style={styles.cardsContainer}>
-        {(tasks[selectedDay] || []).map((task, index) => {
-          const borderColor = getAnimatedValue(task.id).interpolate({
-            inputRange: [0, 1],
-            outputRange: ["white", "#87FF21"],
-          });
-          const timeLeft = calculateTimeLeft(task.startTime, selectedDay);
-          const isTimeMissed = timeLeft === "Incomplete";
-          const isInProgress = timeLeft === "In Progress";
-          return (
-            <Animated.View
-              key={index}
-              style={[
-                styles.taskCard,
-                { borderColor: borderColor, borderWidth: 0.5 },
-              ]}
-            >
-              <View style={styles.taskHeader}>
-                <View style={styles.startTimeContainer}>
-                  <Text style={styles.taskStart}>{task.startTime}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => handleRemoveTask(selectedDay, task.id)}
-                >
-                  <Ionicons name="close" size={20} color="#FF6347" />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.taskTitle}>{task.title}</Text>
-              <Text style={styles.taskSubtitle}>{task.subtitle}</Text>
-              <View style={styles.taskDetails}>
-                <Text
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View>
+            {(tasks[selectedDay] || []).map((task, index) => {
+              const borderColor = getAnimatedValue(task.id).interpolate({
+                inputRange: [0, 1],
+                outputRange: ["white", "#87FF21"],
+              });
+              const timeLeft = calculateTimeLeft(task.startTime, selectedDay);
+              const isTimeMissed = timeLeft === "Incomplete";
+              const isInProgress = timeLeft === "In Progress";
+              return (
+                <Animated.View
+                  key={index}
                   style={[
-                    styles.taskTime,
-                    isTimeMissed
-                      ? styles.taskTimeMissed
-                      : isInProgress
-                      ? styles.taskTimeInProgress
-                      : styles.taskTimeLeft,
+                    styles.taskCard,
+                    { borderColor: borderColor, borderWidth: 0.5 },
                   ]}
                 >
-                  {timeLeft}
-                </Text>
-                {/* Done Button */}
-                <TouchableOpacity
-                  style={[
-                    styles.doneButton,
-                    task.done ? styles.doneButtonGreen : {},
-                  ]}
-                  onPress={() => handleMarkDone(selectedDay, task.id)}
-                >
-                  <Text style={styles.doneButtonText}>
-                    {task.done ? "Undo" : "Done"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
-          );
-        })}
+                  <View style={styles.taskHeader}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setCurrentTaskId(task.id);
+                        setShowTimePicker(true);
+                      }}
+                      style={styles.startTimeContainer}
+                    >
+                      <Text style={styles.taskStart}>{task.startTime}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => handleRemoveTask(selectedDay, task.id)}
+                    >
+                      <Ionicons name="close" size={20} color="#FF6347" />
+                    </TouchableOpacity>
+                  </View>
+                  {editingTask && editingTask.id === task.id ? (
+                    <TextInput
+                      style={[styles.taskTitle, styles.taskTitleInput]}
+                      value={editingTask.title}
+                      onChangeText={(text) =>
+                        setEditingTask((prevTask) => ({
+                          ...prevTask,
+                          title: text,
+                        }))
+                      }
+                      onBlur={handleEndEditing}
+                      onSubmitEditing={handleEndEditing}
+                      multiline={true}
+                      blurOnSubmit={false}
+                      returnKeyType="done"
+                    />
+                  ) : (
+                    <Text
+                      style={styles.taskTitle}
+                      onLongPress={() => setEditingTask(task)}
+                    >
+                      {task.title}
+                    </Text>
+                  )}
+
+                  {editingTask && editingTask.id === task.id ? (
+                    <TextInput
+                      style={[styles.taskSubtitle, styles.taskSubtitleInput]}
+                      value={editingTask.subtitle}
+                      onChangeText={(text) =>
+                        setEditingTask((prevTask) => ({
+                          ...prevTask,
+                          subtitle: text,
+                        }))
+                      }
+                      onBlur={handleEndEditing}
+                      onSubmitEditing={handleEndEditing}
+                      multiline={true}
+                      blurOnSubmit={false}
+                      returnKeyType="done"
+                    />
+                  ) : (
+                    <Text
+                      style={styles.taskSubtitle}
+                      onLongPress={() => setEditingTask(task)}
+                    >
+                      {task.subtitle}
+                    </Text>
+                  )}
+
+                  <View style={styles.taskDetails}>
+                    <Text
+                      style={[
+                        styles.taskTime,
+                        isTimeMissed
+                          ? styles.taskTimeMissed
+                          : isInProgress
+                          ? styles.taskTimeInProgress
+                          : styles.taskTimeLeft,
+                      ]}
+                    >
+                      {timeLeft}
+                    </Text>
+
+                    {/* Done Button */}
+                    <TouchableOpacity
+                      style={[
+                        styles.doneButton,
+                        task.done ? styles.doneButtonGreen : {},
+                      ]}
+                      onPress={() => handleMarkDone(selectedDay, task.id)}
+                    >
+                      <Text style={styles.doneButtonText}>
+                        {task.done ? "Undo" : "Done"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </Animated.View>
+              );
+            })}
+          </View>
+        </TouchableWithoutFeedback>
       </ScrollView>
       <TaskCompletionDialog
         visible={showDialog}
         onClose={() => setShowDialog(false)}
         taskCounts={taskCounts}
       />
+      {renderTimePicker()}
     </View>
   );
 };
@@ -546,14 +656,19 @@ const styles = StyleSheet.create({
     width: "80%",
     alignItems: "center",
     borderWidth: 0.4,
-    borderColor: '#fff'
+    borderColor: "#fff",
   },
   dialogMessage: {
     fontSize: 14,
     marginVertical: 15,
     color: "#fff",
   },
-
+  taskTitleInput: {
+    borderBottomWidth: 1,
+  },
+  taskSubtitleInput: {
+    borderBottomWidth: 1,
+  },
 });
 
 export default HomeScreen;

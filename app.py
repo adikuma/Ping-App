@@ -10,16 +10,13 @@ recognizer = sr.Recognizer()
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
     try:
-        # Retrieve audio file from the request
         audio_file = request.files['file']
         audio_data = audio_file.read()
 
-        # Convert audio to wav format using pydub
         audio = AudioSegment.from_file(BytesIO(audio_data))
         wav_audio = BytesIO()
         audio.export(wav_audio, format='wav')
 
-        # Transcribe using SpeechRecognition
         audio_clip = sr.AudioFile(wav_audio)
         with audio_clip as source:
             audio_content = recognizer.record(source)
