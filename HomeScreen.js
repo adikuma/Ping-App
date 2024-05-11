@@ -6,14 +6,45 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  RefreshControl,
 } from "react-native";
 import * as Font from "expo-font";
+import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
 
 const HomeScreen = () => {
   const [fontLoaded, setFontLoaded] = useState(false);
   const today = new Date();
   const [selectedDay, setSelectedDay] = useState(today.getDate());
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 2000);
+  };
+
+  const calculateTimeLeft = (startTime) => {
+    const currentTime = moment();
+    const startTimeMoment = moment(startTime, "h:mm A");
+    const duration = moment.duration(startTimeMoment.diff(currentTime));
+
+    if (duration.asMilliseconds() <= 0) {
+      return "Incomplete";
+    }
+
+    const hours = duration.hours();
+    const minutes = duration.minutes();
+
+    if (hours === 0) {
+      return `${minutes} min`;
+    } else if (minutes === 0) {
+      return `${hours} hr`;
+    } else {
+      return `${hours} hr ${minutes} min`;
+    }
+  };
 
   const days = [];
   for (let i = 0; i <= 10; i++) {
@@ -32,17 +63,28 @@ const HomeScreen = () => {
         id: 1,
         title: "Robin Buenos",
         subtitle: "Create personas through user research and data",
-        startTime: "2 hours",
+        startTime: "2:00 PM", // Example time
         progress: "89%",
         done: false,
+        timeLeft: "2 hours",
       },
       {
         id: 2,
         title: "John De Palace",
         subtitle: "Developing wireframes and task flows based on user needs",
-        startTime: "3 hours",
+        startTime: "1:00 PM", // Example time
         progress: "100%",
         done: false,
+        timeLeft: "3 hours",
+      },
+      {
+        id: 1,
+        title: "Birthday party",
+        subtitle: "Create personas through user research and data",
+        startTime: "4:00 PM", // Example time
+        progress: "89%",
+        done: false,
+        timeLeft: "2 hours",
       },
     ],
   });
@@ -50,7 +92,7 @@ const HomeScreen = () => {
   const [borderAnimations, setBorderAnimations] = useState({});
   const getAnimatedValue = (id) => {
     if (!borderAnimations[id]) {
-      const animatedValue = new Animated.Value(0); 
+      const animatedValue = new Animated.Value(0);
       setBorderAnimations((prev) => ({ ...prev, [id]: animatedValue }));
       return animatedValue;
     }
@@ -61,7 +103,7 @@ const HomeScreen = () => {
     const animatedValue = getAnimatedValue(id);
     Animated.timing(animatedValue, {
       toValue,
-      duration: 300, 
+      duration: 300,
       useNativeDriver: false,
     }).start();
   };
@@ -77,7 +119,7 @@ const HomeScreen = () => {
     updatedTasks[day] = updatedTasks[day].map((task) => {
       if (task.id === id) {
         const newDoneState = !task.done;
-        animateBorder(id, newDoneState ? 1 : 0); 
+        animateBorder(id, newDoneState ? 1 : 0);
         return { ...task, done: newDoneState };
       }
       return task;
@@ -98,7 +140,7 @@ const HomeScreen = () => {
   }, []);
 
   if (!fontLoaded) {
-    return <View />; 
+    return <View />;
   }
 
   return (
@@ -123,6 +165,9 @@ const HomeScreen = () => {
           horizontal
           style={styles.daysScroll}
           showsHorizontalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
           {days.map((day, index) => (
             <TouchableOpacity
@@ -159,27 +204,42 @@ const HomeScreen = () => {
         {(tasks[selectedDay] || []).map((task, index) => {
           const borderColor = getAnimatedValue(task.id).interpolate({
             inputRange: [0, 1],
-            outputRange: ["white", "#87FF21"], 
+            outputRange: ["white", "#87FF21"],
           });
+          const timeLeft = calculateTimeLeft(task.startTime);
+          const isTimeMissed = timeLeft === "Incomplete";
           return (
             <Animated.View
               key={index}
               style={[
                 styles.taskCard,
-                { borderColor: borderColor, borderWidth: 0.5 }, 
+                { borderColor: borderColor, borderWidth: 0.5 },
               ]}
             >
               {/* Delete Button */}
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => handleRemoveTask(selectedDay, task.id)}
-              >
-                <Ionicons name="close" size={20} color="#FF6347" />
-              </TouchableOpacity>
+              <View style={styles.taskHeader}>
+                <View style={styles.startTimeContainer}>
+                  <Text style={styles.taskStart}>{task.startTime}</Text>
+                </View>
+                {/* Delete Button */}
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleRemoveTask(selectedDay, task.id)}
+                >
+                  <Ionicons name="close" size={20} color="#FF6347" />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.taskTitle}>{task.title}</Text>
               <Text style={styles.taskSubtitle}>{task.subtitle}</Text>
               <View style={styles.taskDetails}>
-                <Text style={styles.taskTime}>{task.startTime}</Text>
+                <Text
+                  style={[
+                    styles.taskTime,
+                    isTimeMissed ? styles.taskTimeMissed : styles.taskTimeLeft,
+                  ]}
+                >
+                  {timeLeft}
+                </Text>
                 <Text style={styles.taskProgress}>{task.progress}</Text>
                 {/* Done Button */}
                 <TouchableOpacity
@@ -286,20 +346,13 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontFamily: "Mona-Sans",
   },
-  deleteButton: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    padding: 5,
-    borderRadius: 100,
-  },
+  deleteButton: {},
   doneButton: {
     paddingHorizontal: 20,
     paddingVertical: 5,
     borderRadius: 100,
   },
-  doneButtonGreen: {
-  },
+  doneButtonGreen: {},
   doneButtonText: {
     color: "#FFFFFF",
     fontSize: 14,
@@ -314,6 +367,33 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: "#444444",
     borderRadius: 100,
+  },
+  taskStart: {
+    fontSize: 14,
+    fontFamily: "Mona-Sans",
+    color: "#FFFFFF",
+  },
+  taskHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  startTimeContainer: {
+    backgroundColor: "#333333",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  taskTime: {
+    fontSize: 14,
+    fontFamily: "Mona-Sans",
+  },
+  taskTimeLeft: {
+    color: "#87FF21",
+  },
+  taskTimeMissed: {
+    color: "#FF6347",
   },
 });
 
