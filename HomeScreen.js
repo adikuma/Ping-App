@@ -12,12 +12,11 @@ import {
 import * as Font from "expo-font";
 import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useNavigation } from '@react-navigation/native';
 
-const HomeScreen = () => {
+const HomeScreen = ({ route }) => {
   const navigation = useNavigation();
   const [fontLoaded, setFontLoaded] = useState(false);
   const today = new Date();
@@ -76,7 +75,7 @@ const HomeScreen = () => {
   }
 
   const [tasks, setTasks] = useState({
-    "11/05/2024": [
+    "13/05/2024": [
       {
         id: 1,
         title: "Robin Buenos",
@@ -118,7 +117,7 @@ const HomeScreen = () => {
         timeLeft: "2 hours",
       },
     ],
-    "12/05/2024": [
+    "14/05/2024": [
       {
         id: 4,
         title: "Meeting with client",
@@ -154,22 +153,57 @@ const HomeScreen = () => {
     return null;
   };
 
-  const onTimeChange = (event, selectedTime) => {
-    setShowTimePicker(false);
-    console.log("Event: ", event);
-    if (event.type === "set" && selectedTime !== undefined) {
-      const newTime = moment(selectedTime).format("h:mm A");
-      setTasks((prevTasks) => {
-        const updatedTasks = {
-          ...prevTasks,
-          [selectedDay]: prevTasks[selectedDay].map((task) =>
-            task.id === currentTaskId ? { ...task, startTime: newTime } : task
-          ),
-        };
-        return sortTasks(updatedTasks);
-      });
-    }
-  };
+    useEffect(() => {
+      if (route.params?.newTask) {
+        const newTask = route.params.newTask;
+        console.log("Data Total:", newTask);
+        console.log("Date from server:", newTask.date);
+        const taskDate = moment(newTask.date, 'DD/MM/YYYY').format('DD/MM/YYYY');
+        console.log("Received new task for date:", taskDate);
+        console.log("New Task Details:", newTask); 
+    
+        setTasks(prevTasks => {
+          const updatedTasks = { ...prevTasks };
+    
+          const newTaskDetails = {
+            id: Date.now(),
+            title: newTask['title'],
+            subtitle: newTask['subtitle'],
+            startTime: newTask['startTime'],
+            done: false,
+            timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
+          };
+    
+          console.log("New Task to Add:", newTaskDetails);
+    
+          if (updatedTasks[taskDate]) {
+            updatedTasks[taskDate].push(newTaskDetails);
+          } else {
+            updatedTasks[taskDate] = [newTaskDetails];
+          }
+    
+          console.log("Updated Tasks Object:", updatedTasks); // Show updated tasks object
+          return updatedTasks;
+        });
+      }
+    }, [route.params?.newTask]);
+
+    const onTimeChange = (event, selectedTime) => {
+      setShowTimePicker(false);
+      console.log("Event: ", event);
+      if (event.type === "set" && selectedTime !== undefined) {
+        const newTime = moment(selectedTime).format("h:mm A");
+        setTasks((prevTasks) => {
+          const updatedTasks = {
+            ...prevTasks,
+            [selectedDay]: prevTasks[selectedDay].map((task) =>
+              task.id === currentTaskId ? { ...task, startTime: newTime } : task
+            ),
+          };
+          return sortTasks(updatedTasks);
+        });
+      }
+    };
 
   const sortTasks = (tasks) => {
     const sortedTasks = { ...tasks };

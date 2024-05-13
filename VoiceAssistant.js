@@ -5,27 +5,22 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  Animated,
-  Easing,
+  TextInput,
+  Keyboard,
 } from "react-native";
-import { Audio } from "expo-av";
-import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
-import * as Font from "expo-font";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { Audio } from "expo-av";
+import * as Font from "expo-font";
+import axios from "axios";
 
 const VoiceAssistantScreen = () => {
-  const navigation = useNavigation(); // Hook to access navigation
-  const [recording, setRecording] = useState(null);
-  const [transcription, setTranscription] = useState("");
-  const [isMorphing, setIsMorphing] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [messages, setMessages] = useState([]);
   const [fontLoaded, setFontLoaded] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  const scalePulseAnim = useRef(new Animated.Value(0)).current;
-  const [isTranscriptionVisible, setIsTranscriptionVisible] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const recordingRef = useRef(null);
+  const navigation = useNavigation();
 
   useEffect(() => {
     async function loadFonts() {
@@ -38,36 +33,19 @@ const VoiceAssistantScreen = () => {
     }
     loadFonts();
   }, []);
-  const startPulsing = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(scalePulseAnim, {
-            toValue: 1.5,
-            duration: 1000,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacityAnim, {
-            toValue: 0,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(scalePulseAnim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacityAnim, {
-            toValue: 1,
-            duration: 0,
-            useNativeDriver: true,
-          }),
-        ]),
-      ])
-    ).start();
+
+  const handleSend = () => {
+    if (inputText.trim() !== "") {
+      setMessages([...messages, { text: inputText, isUser: true }]);
+      setInputText("");
+      setTimeout(() => {
+        setMessages((prevMessages) => [
+          ...prevMessages,
+          { text: "Hello, I'm here and ready to help!", isUser: false },
+        ]);
+      }, 500);
+    }
+    Keyboard.dismiss();
   };
 
   const startRecording = async () => {
@@ -77,160 +55,119 @@ const VoiceAssistantScreen = () => {
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY
-      );
-      setRecording(recording);
-      startMorphing();
-    } catch (err) {
-      console.error("Failed to start recording", err);
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+    } catch (error) {
+      console.log("Failed to start recording", error);
     }
   };
 
   const stopRecording = async () => {
-    setRecording(null);
-    await recording.stopAndUnloadAsync();
-    const uri = recording.getURI();
-    sendAudioToServer(uri);
-    stopMorphing();
+    setIsRecording(false);
+    await recordingRef.current.stopAndUnloadAsync();
+    const uri = recordingRef.current.getURI();
+    transcribeAudio(uri);
   };
 
-  const sendAudioToServer = async (audioUri) => {
-    const formData = new FormData();
-    formData.append("file", {
-      uri: audioUri,
-      type: "audio/wav",
-      name: "audio.wav",
-    });
-
+  const transcribeAudio = async (uri) => {
     try {
-      const response = await fetch("http://192.168.50.240:5000/transcribe", {
-        method: "POST",
-        body: formData,
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
-      const result = await response.json();
-      if (result.transcription) {
-        setTranscription(result.transcription);
-        setIsTranscriptionVisible(true); // Show the transcription dialog
-      } else if (result.error) {
-        console.error("Error:", result.error);
-      }
-    } catch (err) {
-      console.error("Error sending audio:", err);
+        const formData = new FormData();
+        formData.append("file", {
+            uri,
+            name: "audio.wav",
+            type: "audio/wav",
+        });
+        
+        const response = await axios.post("http://192.168.50.240:5000/transcribe", formData, {
+            headers: {
+                "Content-Type": "multipart/form-data",
+            },
+        });
+        console.log('Response from server:', response.data);
+
+        const { transcription, task_details } = response.data;
+
+        console.log('Transcription:', transcription);
+        console.log('Task Details Received:', task_details);
+
+        setMessages((prevMessages) => [
+            ...prevMessages,
+            { text: transcription, isUser: true },
+            { text: `Task: ${task_details.title}, Due: ${task_details.date}`, isUser: false },
+        ]);
+
+        navigation.navigate('Home', { newTask: task_details });
+    } catch (error) {
+        console.error("Transcription error", error);
     }
-  };
+};
 
-  const toggleRecording = () => {
-    if (recording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
-  const startMorphing = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(scaleAnim, {
-          toValue: 1.05,
-          duration: 1500,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scaleAnim, {
-          toValue: 1,
-          duration: 800,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
-    Animated.loop(
-      Animated.timing(rotateAnim, {
-        toValue: 1,
-        duration: 1600,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    ).start();
-  };
-
-  const stopMorphing = () => {
-    scaleAnim.stopAnimation();
-    rotateAnim.stopAnimation();
-  };
-
-  const rotateInterpolation = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "0deg"],
-  });
-
-  const animatedStyle = {
-    transform: [{ scale: scaleAnim }, { rotate: rotateInterpolation }],
-  };
+  if (!fontLoaded) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.closeButton}
-        onPress={() => navigation.goBack()}
-      >
-        <Ionicons name="close-circle" size={50} color="#fff" />
-      </TouchableOpacity>
+<View style={styles.header}>
+  <TouchableOpacity
+    style={styles.closeButton}
+    onPress={() => navigation.goBack()}
+  >
+  <Ionicons name="arrow-back" size={24} color="#fff" />
+  </TouchableOpacity>
+  {/* <Text style={styles.instructionText}>Talk to the me to set a reminder!</Text> */}
+</View>
+<View style={styles.line}></View>
 
-      <TouchableOpacity onPress={toggleRecording}>
-        <View style={styles.pulseContainer}>
-          <Animated.View
+      <ScrollView style={styles.messagesContainer}>
+        {messages.map((message, index) => (
+          <View
+            key={index}
             style={[
-              styles.pulse,
-              {
-                opacity: opacityAnim,
-                transform: [{ scale: scalePulseAnim }],
-              },
+              styles.messageContainer,
+              message.isUser
+                ? styles.userMessageContainer
+                : styles.assistantMessageContainer,
             ]}
+          >
+            <Text
+              style={[
+                styles.messageText,
+                message.isUser
+                  ? styles.userMessageText
+                  : styles.assistantMessageText,
+              ]}
+            >
+              {message.text}
+            </Text>
+          </View>
+        ))}
+      </ScrollView>
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Type your message..."
+          placeholderTextColor="#888"
+          value={inputText}     
+          onChangeText={setInputText}
+          onSubmitEditing={handleSend}
+          blurOnSubmit={false}
+        />
+        <TouchableOpacity
+          style={styles.recordButton}
+          onPress={isRecording ? stopRecording : startRecording}
+        >
+          <Ionicons
+            name={isRecording ? "stop" : "mic"}
+            size={24}
+            color="#000"
           />
-        </View>
-        <Animated.View style={[styles.blob, animatedStyle]}>
-          <BlurView intensity={50} style={styles.blur} />
-          <View style={styles.innerBlob}>
-            {fontLoaded && (
-              <Text style={styles.recordingText}>
-                {recording ? "Stop" : "Start"}
-              </Text>
-            )}
-          </View>
-        </Animated.View>
-      </TouchableOpacity>
-      {isTranscriptionVisible && (
-        <View style={styles.transcriptionDialog}>
-          <Text style={styles.transcriptionHeader}>Transcription</Text>
-          <ScrollView style={styles.transcriptionContent}>
-            <Text style={styles.transcriptionText}>{transcription}</Text>
-          </ScrollView>
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
-              onPress={() => setIsTranscriptionVisible(false)}
-            >
-              <Text style={styles.buttonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.submitButton]}
-              onPress={() => {
-                console.log("Submit transcription");
-                setIsTranscriptionVisible(false);
-              }}
-            >
-              <Text style={styles.buttonText}>Submit</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -238,96 +175,91 @@ const VoiceAssistantScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
     backgroundColor: "#000",
+    paddingHorizontal: 16,
+    paddingTop: 30,
   },
-  closeButton: {
-    position: "absolute",
-    top: 30,
-    right: 20,
-  },
-  blob: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    overflow: "hidden",
-    position: "relative",
-  },
-  blur: {
-    flex: 1,
-    borderRadius: 100,
-  },
-  innerBlob: {
-    position: "absolute",
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: "#D71921",
+  header: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  recordingText: {
-    fontFamily: "DotFont",
-    fontSize: 24,
-    color: "#fff",
-  },
-  transcription: {
-    marginTop: 20,
-    fontSize: 18,
-    color: "#888888",
-    fontFamily: "Mono-Sans",
-  },
-  transcriptionDialog: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#000",
-    padding: 20,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderColor: "#fff",
-    borderWidth: 0.5,
-  },
-  transcriptionHeader: {
-    fontSize: 24,
-    color: "#fff",
     marginBottom: 10,
-    justifyContent: "left",
-    fontFamily: "Mona-Sans-Bold",
   },
-  transcriptionContent: {
-    width: "100%",
-    maxHeight: 100,
-  },
-  transcriptionText: {
-    color: "#FFF",
+  instructionText: {
+    color: "#888888",
     fontSize: 14,
     fontFamily: "Mona-Sans",
-    marginBottom: 20,
+    textAlign: "center",
+    alignSelf: 'center',
+    justifyContent: 'center', // Center vertically
+    flex: 1, 
+  },  
+
+  messagesContainer: {
+    flex: 1,
+    padding: 16,
   },
-  buttonContainer: {
+  messageContainer: {
+    marginBottom: 10,
+    maxWidth: "80%",
+  },
+  userMessageContainer: {
+    alignSelf: "flex-end",
+    borderRadius: 10,
+    padding: 10,
+  },
+  assistantMessageContainer: {
+    alignSelf: "flex-start",
+    borderRadius: 10,
+    padding: 10,
+  },
+  messageText: {
+    fontSize: 16,
+    fontFamily: "Mona-Sans",
+  },
+  userMessageText: {
+    color: "#F28C28",
+  },
+  assistantMessageText: {
+    color: "#fff",
+  },
+  inputContainer: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
+    alignItems: "center",
+    padding: 10,
+    borderTopWidth: 1,
+    justifyContent: 'space-between', 
   },
-  button: {
+  input: {
+    flex: 1,
+    backgroundColor: "#000",
+    borderRadius: 20,
+    paddingHorizontal: 15,
     paddingVertical: 10,
-    paddingHorizontal: 20,
+    marginRight: 10,
+    color: "#fff",
+    fontFamily: "Mona-Sans",
+    fontSize: 14,
+  },
+  recordButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#F28C28",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  closeButton:{
+    padding: 10,
+    backgroundColor: "#444444",
     borderRadius: 100,
-    margin: 5,
+  },
+  line: {
+    height: 0.5, 
+    backgroundColor: '#888888', 
+    marginTop: 10,
   },
 
-  cancelButton: {
-    backgroundColor: "#FF6347", 
-  },
-  submitButton: {
-    backgroundColor: "#F28C28", 
-  },
-  buttonText:{
-    color: "#fff",
-  }
+
 });
 
 export default VoiceAssistantScreen;

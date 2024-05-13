@@ -1,32 +1,23 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from openai import OpenAI
 import speech_recognition as sr
 from pydub import AudioSegment
 from io import BytesIO
-from openai import OpenAI
 import json
 
-app = Flask(__name__)
-CORS(app)
-recognizer = sr.Recognizer()
-
+# Setup
 api_key = 'sk-proj-CGHzSQzNC5bBJtHFkhjST3BlbkFJmQ1vzYcUU861qgcgC0De'
 client = OpenAI(api_key=api_key)
+recognizer = sr.Recognizer()
 
-@app.route('/transcribe', methods=['POST'])
-def transcribe():
-    try:
-        audio_file = request.files['file']
-        audio_data = audio_file.read()
-
-        audio = AudioSegment.from_file(BytesIO(audio_data))
+def transcribe(audio_path):
+        audio = AudioSegment.from_file(audio_path)
         wav_audio = BytesIO()
         audio.export(wav_audio, format='wav')
 
-        audio_clip = sr.AudioFile(wav_audio)
-        with audio_clip as source:
+        with sr.AudioFile(wav_audio) as source:
             audio_content = recognizer.record(source)
         transcription = recognizer.recognize_google(audio_content)
+
         formatted = {
             "title": "Extracted title from response",
             "subtitle": "Extracted subtitle from response",
@@ -48,9 +39,7 @@ def transcribe():
         task_details_json = json.loads(task_details) 
         print("Task details as JSON:", task_details_json)
         print("Type of task details JSON:", type(task_details_json))  
-        return jsonify({"transcription": transcription, "task_details": task_details_json})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return task_details_json
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+
+transcribe('audio.wav')
