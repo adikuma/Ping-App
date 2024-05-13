@@ -8,13 +8,14 @@ import {
   Animated,
   RefreshControl,
   TextInput,
+  Vibration,
 } from "react-native";
 import * as Font from "expo-font";
 import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { TouchableWithoutFeedback, Keyboard } from "react-native";
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation } from "@react-navigation/native";
 
 const HomeScreen = ({ route }) => {
   const navigation = useNavigation();
@@ -153,57 +154,57 @@ const HomeScreen = ({ route }) => {
     return null;
   };
 
-    useEffect(() => {
-      if (route.params?.newTask) {
-        const newTask = route.params.newTask;
-        console.log("Data Total:", newTask);
-        console.log("Date from server:", newTask.date);
-        const taskDate = moment(newTask.date, 'DD/MM/YYYY').format('DD/MM/YYYY');
-        console.log("Received new task for date:", taskDate);
-        console.log("New Task Details:", newTask); 
-    
-        setTasks(prevTasks => {
-          const updatedTasks = { ...prevTasks };
-    
-          const newTaskDetails = {
-            id: Date.now(),
-            title: newTask['title'],
-            subtitle: newTask['subtitle'],
-            startTime: newTask['startTime'],
-            done: false,
-            timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
-          };
-    
-          console.log("New Task to Add:", newTaskDetails);
-    
-          if (updatedTasks[taskDate]) {
-            updatedTasks[taskDate].push(newTaskDetails);
-          } else {
-            updatedTasks[taskDate] = [newTaskDetails];
-          }
-    
-          console.log("Updated Tasks Object:", updatedTasks); // Show updated tasks object
-          return updatedTasks;
-        });
-      }
-    }, [route.params?.newTask]);
+  useEffect(() => {
+    if (route.params?.newTask) {
+      const newTask = route.params.newTask;
+      console.log("Data Total:", newTask);
+      console.log("Date from server:", newTask.date);
+      const taskDate = moment(newTask.date, "DD/MM/YYYY").format("DD/MM/YYYY");
+      console.log("Received new task for date:", taskDate);
+      console.log("New Task Details:", newTask);
 
-    const onTimeChange = (event, selectedTime) => {
-      setShowTimePicker(false);
-      console.log("Event: ", event);
-      if (event.type === "set" && selectedTime !== undefined) {
-        const newTime = moment(selectedTime).format("h:mm A");
-        setTasks((prevTasks) => {
-          const updatedTasks = {
-            ...prevTasks,
-            [selectedDay]: prevTasks[selectedDay].map((task) =>
-              task.id === currentTaskId ? { ...task, startTime: newTime } : task
-            ),
-          };
-          return sortTasks(updatedTasks);
-        });
-      }
-    };
+      setTasks((prevTasks) => {
+        const updatedTasks = { ...prevTasks };
+
+        const newTaskDetails = {
+          id: Date.now(),
+          title: newTask["title"],
+          subtitle: newTask["subtitle"],
+          startTime: newTask["startTime"],
+          done: false,
+          timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
+        };
+
+        console.log("New Task to Add:", newTaskDetails);
+
+        if (updatedTasks[taskDate]) {
+          updatedTasks[taskDate].push(newTaskDetails);
+        } else {
+          updatedTasks[taskDate] = [newTaskDetails];
+        }
+
+        console.log("Updated Tasks Object:", updatedTasks);
+        return updatedTasks;
+      });
+    }
+  }, [route.params?.newTask]);
+
+  const onTimeChange = (event, selectedTime) => {
+    setShowTimePicker(false);
+    console.log("Event: ", event);
+    if (event.type === "set" && selectedTime !== undefined) {
+      const newTime = moment(selectedTime).format("h:mm A");
+      setTasks((prevTasks) => {
+        const updatedTasks = {
+          ...prevTasks,
+          [selectedDay]: prevTasks[selectedDay].map((task) =>
+            task.id === currentTaskId ? { ...task, startTime: newTime } : task
+          ),
+        };
+        return sortTasks(updatedTasks);
+      });
+    }
+  };
 
   const sortTasks = (tasks) => {
     const sortedTasks = { ...tasks };
@@ -235,12 +236,14 @@ const HomeScreen = ({ route }) => {
   };
 
   const handleRemoveTask = (day, id) => {
+    Vibration.vibrate(50);
     const updatedTasks = { ...tasks };
     updatedTasks[day] = updatedTasks[day].filter((task) => task.id !== id);
     setTasks(updatedTasks);
   };
 
   const handleMarkDone = (day, id) => {
+    Vibration.vibrate(50);
     const updatedTasks = { ...tasks };
     let completedTasks = 0;
 
@@ -309,6 +312,7 @@ const HomeScreen = ({ route }) => {
   };
 
   const handleEndEditing = () => {
+    Vibration.vibrate(50);
     if (editingTask) {
       setTasks((prevTasks) => {
         const updatedTasks = {
@@ -344,7 +348,12 @@ const HomeScreen = ({ route }) => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.hello}>Hello Aditya,</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('VoiceAssistant')}>
+        <TouchableOpacity
+          onPress={() => {
+            Vibration.vibrate(50);
+            navigation.navigate("VoiceAssistant");
+          }}
+        >
           <Ionicons
             name="add"
             size={24}
@@ -368,13 +377,14 @@ const HomeScreen = ({ route }) => {
           {days.map((day, index) => (
             <TouchableOpacity
               key={index}
-              onPress={() =>
+              onPress={() => {
+                Vibration.vibrate(50);
                 setSelectedDay(
                   formatDate(
                     new Date(today.getFullYear(), today.getMonth(), day.date)
                   )
-                )
-              }
+                );
+              }}
             >
               <View
                 style={[
@@ -431,6 +441,7 @@ const HomeScreen = ({ route }) => {
                   <View style={styles.taskHeader}>
                     <TouchableOpacity
                       onPress={() => {
+                        Vibration.vibrate(50);
                         setCurrentTaskId(task.id);
                         setShowTimePicker(true);
                       }}
@@ -464,7 +475,10 @@ const HomeScreen = ({ route }) => {
                   ) : (
                     <Text
                       style={styles.taskTitle}
-                      onLongPress={() => setEditingTask(task)}
+                      onLongPress={() => {
+                        Vibration.vibrate(50);
+                        setEditingTask(task);
+                      }}
                     >
                       {task.title}
                     </Text>
@@ -489,7 +503,10 @@ const HomeScreen = ({ route }) => {
                   ) : (
                     <Text
                       style={styles.taskSubtitle}
-                      onLongPress={() => setEditingTask(task)}
+                      onLongPress={() => {
+                        Vibration.vibrate(50);
+                        setEditingTask(task);
+                      }}
                     >
                       {task.subtitle}
                     </Text>
