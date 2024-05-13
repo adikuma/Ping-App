@@ -15,6 +15,7 @@ import { Audio } from "expo-av";
 import * as Font from "expo-font";
 import axios from "axios";
 import PulsingWaves from "./PulsingWave";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const VoiceAssistantScreen = () => {
   const [inputText, setInputText] = useState("");
@@ -108,44 +109,55 @@ const VoiceAssistantScreen = () => {
     clearInterval(recordingRef.current.vibrationIntervalId);
   };
 
+  
+  const updateTasksInStorage = async (newTask) => {
+    try {
+      const storedTasks = await AsyncStorage.getItem('tasks');
+      const tasks = storedTasks ? JSON.parse(storedTasks) : {};
+  
+      const taskDate = newTask.date; // Ensure the date is in "DD/MM/YYYY" format
+      if (!tasks[taskDate]) {
+        tasks[taskDate] = [];
+      }
+      tasks[taskDate].push(newTask);
+  
+      await AsyncStorage.setItem('tasks', JSON.stringify(tasks));
+    } catch (error) {
+      console.error('Failed to save the new task:', error);
+    }
+  };
+
+
   const transcribeAudio = async (uri) => {
     try {
       const formData = new FormData();
-      formData.append("file", {
-        uri,
-        name: "audio.wav",
-        type: "audio/wav",
+      formData.append("file", { uri, name: "audio.wav", type: "audio/wav" });
+  
+      const response = await axios.post("http://192.168.50.240:5000/transcribe", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
-
-      const response = await axios.post(
-        "http://192.168.50.240:5000/transcribe",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        }
-      );
       console.log("Response from server:", response.data);
-
+  
       const { transcription, task_details } = response.data;
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        { text: transcription, isUser: true },
-      ]);
+      setMessages((prevMessages) => [...prevMessages, { text: transcription, isUser: true }]);
       animateText(transcription);
+  
+      updateTasksInStorage(task_details);
       setTimeout(() => {
         navigation.navigate("Home", { newTask: task_details });
       }, 5000);
+  
     } catch (error) {
       console.error("Transcription error", error);
     }
   };
-
+  
   if (!fontLoaded) {
     return null;
   }
 
+
+  
   return (
     <View style={styles.container}>
       <View style={styles.header}>

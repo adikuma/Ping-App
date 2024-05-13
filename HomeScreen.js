@@ -16,6 +16,9 @@ import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+//storage way
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import SplashScreen from "./SplashScreen";
 
 const HomeScreen = ({ route }) => {
   const navigation = useNavigation();
@@ -75,6 +78,45 @@ const HomeScreen = ({ route }) => {
     });
   }
 
+
+  const loadTasks = async () => {
+    try {
+      const storedTasks = await AsyncStorage.getItem('tasks');
+      if (storedTasks === null) {
+        await AsyncStorage.setItem('tasks', JSON.stringify({}));
+        setTasks({});
+      } else {
+        const parsedTasks = JSON.parse(storedTasks);
+        setTasks(parsedTasks);
+  
+        // Trigger border animation for completed tasks
+        Object.values(parsedTasks).forEach((dayTasks) => {
+          dayTasks.forEach((task) => {
+            if (task.done) {
+              animateBorder(task.id, 1);
+            }
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load tasks from AsyncStorage:', error);
+    }
+  };
+  
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
+  
+  const saveTasks = async (newTasks) => {
+    try {
+      const jsonValue = JSON.stringify(newTasks);
+      await AsyncStorage.setItem('tasks', jsonValue);
+    } catch (error) {
+      console.error('Failed to save tasks:', error);
+    }
+  };
+  
   const [tasks, setTasks] = useState({
     "13/05/2024": [
       {
@@ -157,38 +199,39 @@ const HomeScreen = ({ route }) => {
   useEffect(() => {
     if (route.params?.newTask) {
       const newTask = route.params.newTask;
-      console.log("Data Total:", newTask);
-      console.log("Date from server:", newTask.date);
-      const taskDate = moment(newTask.date, "DD/MM/YYYY").format("DD/MM/YYYY");
-      console.log("Received new task for date:", taskDate);
-      console.log("New Task Details:", newTask);
-
-      setTasks((prevTasks) => {
-        const updatedTasks = { ...prevTasks };
-
-        const newTaskDetails = {
-          id: Date.now(),
-          title: newTask["title"],
-          subtitle: newTask["subtitle"],
-          startTime: newTask["startTime"],
-          done: false,
-          timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
-        };
-
-        console.log("New Task to Add:", newTaskDetails);
-
-        if (updatedTasks[taskDate]) {
-          updatedTasks[taskDate].push(newTaskDetails);
-        } else {
-          updatedTasks[taskDate] = [newTaskDetails];
-        }
-
-        console.log("Updated Tasks Object:", updatedTasks);
-        return updatedTasks;
-      });
+      console.log("Received new task for date:", newTask.date);
+      addNewTask(newTask);
     }
   }, [route.params?.newTask]);
-
+  
+  const addNewTask = async (newTask) => {
+    const taskDate = moment(newTask.date, "DD/MM/YYYY").format("DD/MM/YYYY");
+    const newTaskDetails = {
+      id: Date.now(), 
+      ...newTask,
+      done: false,
+      timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
+    };
+  
+    await setTasks((prevTasks) => {
+      const updatedTasks = { ...prevTasks };
+      updatedTasks[taskDate] = updatedTasks[taskDate] || [];
+      updatedTasks[taskDate].push(newTaskDetails);
+      saveTasks(updatedTasks); 
+      return updatedTasks;
+    });
+  };
+  
+  const handleRemoveTask = async (day, id) => {
+    Vibration.vibrate(50);
+    await setTasks((prevTasks) => {
+      const updatedTasks = { ...prevTasks };
+      updatedTasks[day] = updatedTasks[day].filter((task) => task.id !== id);
+      saveTasks(updatedTasks);
+      return updatedTasks;
+    });
+  };
+  
   const onTimeChange = (event, selectedTime) => {
     setShowTimePicker(false);
     console.log("Event: ", event);
@@ -235,40 +278,53 @@ const HomeScreen = ({ route }) => {
     }).start();
   };
 
-  const handleRemoveTask = (day, id) => {
-    Vibration.vibrate(50);
-    const updatedTasks = { ...tasks };
-    updatedTasks[day] = updatedTasks[day].filter((task) => task.id !== id);
-    setTasks(updatedTasks);
-  };
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const updatedTasks = { ...tasks };
+      Object.keys(updatedTasks).forEach(day => {
+        updatedTasks[day] = updatedTasks[day].map(task => ({
+          ...task,
+          timeLeft: calculateTimeLeft(task.startTime, day)
+        }));
+      });
+      setTasks(updatedTasks);
+      saveTasks(updatedTasks);
+    }, 60000); 
+  
+    return () => clearInterval(interval);
+  }, [tasks]);
+  
 
-  const handleMarkDone = (day, id) => {
+  const handleMarkDone = async (day, id) => {
     Vibration.vibrate(50);
-    const updatedTasks = { ...tasks };
-    let completedTasks = 0;
-
-    updatedTasks[day] = updatedTasks[day].map((task) => {
-      if (task.id === id) {
-        const newDoneState = !task.done;
-        animateBorder(id, newDoneState ? 1 : 0);
-        return { ...task, done: newDoneState };
+    await setTasks((prevTasks) => {
+      const updatedTasks = { ...prevTasks };
+      let completedTasks = 0;
+  
+      updatedTasks[day] = updatedTasks[day].map((task) => {
+        if (task.id === id) {
+          const newDoneState = !task.done;
+          animateBorder(id, newDoneState ? 1 : 0);
+          return { ...task, done: newDoneState };
+        }
+        if (task.done) completedTasks++;
+        return task;
+      });
+  
+      const totalTasks = updatedTasks[day].length;
+      const newCompletedTasks = tasks[day].find((task) => task.id === id)?.done
+        ? completedTasks - 1
+        : completedTasks + 1;
+  
+      setTaskCounts({ total: totalTasks, completed: newCompletedTasks });
+  
+      if (newCompletedTasks === totalTasks) {
+        setShowDialog(true);
       }
-      if (task.done) completedTasks++;
-      return task;
+  
+      saveTasks(updatedTasks);
+      return updatedTasks;
     });
-
-    const totalTasks = updatedTasks[day].length;
-    const newCompletedTasks = tasks[day].find((task) => task.id === id)?.done
-      ? completedTasks - 1
-      : completedTasks + 1;
-
-    setTaskCounts({ total: totalTasks, completed: newCompletedTasks });
-
-    if (newCompletedTasks === totalTasks) {
-      setShowDialog(true);
-    }
-
-    setTasks(updatedTasks);
   };
 
   const TaskCompletionDialog = ({ visible, onClose, taskCounts }) => {
@@ -311,21 +367,24 @@ const HomeScreen = ({ route }) => {
     );
   };
 
-  const handleEndEditing = () => {
+  const handleEndEditing = async () => {
     Vibration.vibrate(50);
     if (editingTask) {
-      setTasks((prevTasks) => {
-        const updatedTasks = {
-          ...prevTasks,
-          [selectedDay]: prevTasks[selectedDay].map((task) =>
-            task.id === editingTask.id ? { ...task, ...editingTask } : task
-          ),
-        };
-        return updatedTasks;
-      });
-      setEditingTask(null);
+        await setTasks((prevTasks) => {
+            const updatedTasks = {
+                ...prevTasks,
+                [selectedDay]: prevTasks[selectedDay].map((task) =>
+                    task.id === editingTask.id ? { ...task, ...editingTask } : task
+                ),
+            };
+            // Save the updated tasks to AsyncStorage
+            saveTasks(updatedTasks);
+            return updatedTasks;
+        });
+        setEditingTask(null);
     }
-  };
+};
+
 
   useEffect(() => {
     async function loadFonts() {
@@ -344,6 +403,7 @@ const HomeScreen = ({ route }) => {
   }
 
   return (
+    <SplashScreen>
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
@@ -552,6 +612,7 @@ const HomeScreen = ({ route }) => {
       />
       {renderTimePicker()}
     </View>
+    </SplashScreen>
   );
 };
 
