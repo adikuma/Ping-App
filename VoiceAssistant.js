@@ -155,8 +155,6 @@ const VoiceAssistantScreen = () => {
   if (!fontLoaded) {
     return null;
   }
-
-
   
   return (
     <View style={styles.container}>
@@ -213,7 +211,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
     paddingHorizontal: 16,
-    paddingTop: 30,
+    paddingTop: 40,
   },
   header: {
     flexDirection: "row",

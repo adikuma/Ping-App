@@ -13,12 +13,12 @@ import {
 import * as Font from "expo-font";
 import moment from "moment";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { TouchableWithoutFeedback, Keyboard } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-//storage way
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SplashScreen from "./SplashScreen";
+import * as Notifications from 'expo-notifications';
+import CustomTimePicker from "./CustomTimePicker";
 
 const HomeScreen = ({ route }) => {
   const navigation = useNavigation();
@@ -30,10 +30,24 @@ const HomeScreen = ({ route }) => {
   const [selectedDay, setSelectedDay] = useState(formatDate(today));
   const [refreshing, setRefreshing] = useState(false);
   const [taskCounts, setTaskCounts] = useState({ total: 0, completed: 0 });
-  const [showDialog, setShowDialog] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const [message, setMessage] = useState('');
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const messages = [
+    "Here are your tasks for today!",
+    "Let's conquer today's tasks!",
+    "Ready to tackle your tasks?",
+    "These are your tasks for today.",
+    "Let's get things done!",
+    "Time to be productive!",
+    "Today's tasks await you!",
+    "You're going to rock these tasks!",
+    "Tasks lined up for today!",
+    "Today's to-do list is ready!"
+  ];
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -42,33 +56,28 @@ const HomeScreen = ({ route }) => {
     }, 2000);
   };
 
-  const calculateTimeLeft = (startTime, taskDate) => {
+  const calculateTimeLeft = (startTime, taskDate, done) => {
+    if (done) {
+      return "Completed";
+    }
     const currentTime = moment();
-    const startTimeMoment = moment(startTime, "h:mm A");
-    const taskDateTime = moment(
-      taskDate + " " + startTime,
-      "DD/MM/YYYY h:mm A"
-    );
+    const taskDateTime = moment(taskDate + " " + startTime, "DD/MM/YYYY h:mm A");
     if (!taskDateTime.isSame(currentTime, "day")) {
       return "In Progress";
     }
-
     const duration = moment.duration(taskDateTime.diff(currentTime));
-
     if (duration.asMilliseconds() <= 0) {
       return "Incomplete";
     }
-
     if (duration.asMinutes() < 60) {
       const minutes = duration.minutes();
       return `${minutes} min`;
     }
-
     return "In Progress";
   };
 
   const days = [];
-  for (let i = 0; i <= 10; i++) {
+  for (let i = 0; i <= 14; i++) {
     const day = new Date(today);
     day.setDate(today.getDate() + i);
     days.push({
@@ -78,18 +87,16 @@ const HomeScreen = ({ route }) => {
     });
   }
 
-
   const loadTasks = async () => {
     try {
-      const storedTasks = await AsyncStorage.getItem('tasks');
+      const storedTasks = await AsyncStorage.getItem("tasks");
       if (storedTasks === null) {
-        await AsyncStorage.setItem('tasks', JSON.stringify({}));
+        await AsyncStorage.setItem("tasks", JSON.stringify({}));
         setTasks({});
       } else {
         const parsedTasks = JSON.parse(storedTasks);
         setTasks(parsedTasks);
-  
-        // Trigger border animation for completed tasks
+
         Object.values(parsedTasks).forEach((dayTasks) => {
           dayTasks.forEach((task) => {
             if (task.done) {
@@ -99,24 +106,30 @@ const HomeScreen = ({ route }) => {
         });
       }
     } catch (error) {
-      console.error('Failed to load tasks from AsyncStorage:', error);
+      console.error("Failed to load tasks from AsyncStorage:", error);
     }
   };
-  
+
   useEffect(() => {
     loadTasks();
+    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+    setMessage(randomMessage);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
   }, []);
 
-  
   const saveTasks = async (newTasks) => {
     try {
       const jsonValue = JSON.stringify(newTasks);
-      await AsyncStorage.setItem('tasks', jsonValue);
+      await AsyncStorage.setItem("tasks", jsonValue);
     } catch (error) {
-      console.error('Failed to save tasks:', error);
+      console.error("Failed to save tasks:", error);
     }
   };
-  
+
   const [tasks, setTasks] = useState({
     "13/05/2024": [
       {
@@ -180,21 +193,13 @@ const HomeScreen = ({ route }) => {
     ],
   });
 
-  const renderTimePicker = () => {
-    if (showTimePicker) {
-      return (
-        <DateTimePicker
-          value={new Date()}
-          mode="time"
-          is24Hour={false}
-          display="default"
-          onChange={onTimeChange}
-          themeVariant="dark"
-        />
-      );
-    }
-    return null;
-  };
+  const renderTimePicker = () => (
+    <CustomTimePicker
+      visible={showTimePicker}
+      onConfirm={onTimeChange}
+      onCancel={() => setShowTimePicker(false)}
+    />
+  );
 
   useEffect(() => {
     if (route.params?.newTask) {
@@ -203,25 +208,37 @@ const HomeScreen = ({ route }) => {
       addNewTask(newTask);
     }
   }, [route.params?.newTask]);
-  
+
   const addNewTask = async (newTask) => {
     const taskDate = moment(newTask.date, "DD/MM/YYYY").format("DD/MM/YYYY");
     const newTaskDetails = {
-      id: Date.now(), 
+      id: Date.now(),
       ...newTask,
       done: false,
       timeLeft: calculateTimeLeft(newTask.startTime, taskDate),
     };
-  
+
     await setTasks((prevTasks) => {
       const updatedTasks = { ...prevTasks };
       updatedTasks[taskDate] = updatedTasks[taskDate] || [];
       updatedTasks[taskDate].push(newTaskDetails);
-      saveTasks(updatedTasks); 
+      saveTasks(updatedTasks);
       return updatedTasks;
     });
+
+    await scheduleNotification(newTaskDetails);
   };
-  
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        console.log("Notification received:", notification);
+      }
+    );
+
+    return () => subscription.remove();
+  }, []);
+
   const handleRemoveTask = async (day, id) => {
     Vibration.vibrate(50);
     await setTasks((prevTasks) => {
@@ -231,11 +248,60 @@ const HomeScreen = ({ route }) => {
       return updatedTasks;
     });
   };
-  
-  const onTimeChange = (event, selectedTime) => {
+
+  useEffect(() => {
+    async function setupNotifications() {
+      const settings = await Notifications.getPermissionsAsync();
+      console.log("Current notification settings:", settings);
+
+      if (settings.granted || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+        console.log("Notification permissions are granted.");
+      } else {
+        console.log("Requesting notification permissions...");
+        const { status } = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: true,
+            allowSound: true,
+            allowAnnouncements: true,
+          },
+        });
+        if (status === "granted") {
+          console.log("Notification permissions granted after request.");
+        } else {
+          console.log("Notification permissions denied.");
+          alert("Permission to send notifications was denied!");
+        }
+      }
+    }
+
+    setupNotifications();
+  }, []);
+
+  const scheduleNotification = async (task) => {
+    const taskDateTime = moment(`${task.date} ${task.startTime}`, "DD/MM/YYYY h:mm A");
+    const currentTime = moment();
+
+    if (taskDateTime.isBefore(currentTime)) {
+      console.error("Cannot schedule notification in the past:", taskDateTime.toString());
+      return;
+    }
+
+    console.log(`Scheduling notification for ${task.title} at ${taskDateTime.format()}`);
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Task Reminder 📌",
+        body: `${task.title} at ${task.startTime}`,
+        data: { task },
+      },
+      trigger: taskDateTime.toDate(),
+    });
+    console.log("Notification scheduled with ID:", notificationId);
+  };
+
+  const onTimeChange = (selectedTime) => {
     setShowTimePicker(false);
-    console.log("Event: ", event);
-    if (event.type === "set" && selectedTime !== undefined) {
+    if (selectedTime) {
       const newTime = moment(selectedTime).format("h:mm A");
       setTasks((prevTasks) => {
         const updatedTasks = {
@@ -281,26 +347,25 @@ const HomeScreen = ({ route }) => {
   useEffect(() => {
     const interval = setInterval(() => {
       const updatedTasks = { ...tasks };
-      Object.keys(updatedTasks).forEach(day => {
-        updatedTasks[day] = updatedTasks[day].map(task => ({
+      Object.keys(updatedTasks).forEach((day) => {
+        updatedTasks[day] = updatedTasks[day].map((task) => ({
           ...task,
-          timeLeft: calculateTimeLeft(task.startTime, day)
+          timeLeft: calculateTimeLeft(task.startTime, day),
         }));
       });
       setTasks(updatedTasks);
       saveTasks(updatedTasks);
-    }, 60000); 
-  
+    }, 60000);
+
     return () => clearInterval(interval);
   }, [tasks]);
-  
 
   const handleMarkDone = async (day, id) => {
     Vibration.vibrate(50);
     await setTasks((prevTasks) => {
       const updatedTasks = { ...prevTasks };
       let completedTasks = 0;
-  
+
       updatedTasks[day] = updatedTasks[day].map((task) => {
         if (task.id === id) {
           const newDoneState = !task.done;
@@ -310,81 +375,34 @@ const HomeScreen = ({ route }) => {
         if (task.done) completedTasks++;
         return task;
       });
-  
+
       const totalTasks = updatedTasks[day].length;
       const newCompletedTasks = tasks[day].find((task) => task.id === id)?.done
         ? completedTasks - 1
         : completedTasks + 1;
-  
+
       setTaskCounts({ total: totalTasks, completed: newCompletedTasks });
-  
-      if (newCompletedTasks === totalTasks) {
-        setShowDialog(true);
-      }
-  
       saveTasks(updatedTasks);
       return updatedTasks;
     });
   };
 
-  const TaskCompletionDialog = ({ visible, onClose, taskCounts }) => {
-    const animation = useRef(new Animated.Value(-100)).current;
-
-    useEffect(() => {
-      if (visible) {
-        Animated.sequence([
-          Animated.timing(animation, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-          Animated.delay(3000),
-          Animated.timing(animation, {
-            toValue: -100,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start(() => onClose());
-      }
-    }, [visible, onClose]);
-
-    if (!visible) return null;
-
-    return (
-      <Animated.View
-        style={[
-          styles.dialogContainer,
-          { transform: [{ translateY: animation }] },
-        ]}
-      >
-        <View style={styles.dialog}>
-          <Text style={styles.dialogMessage}>
-            You have completed {taskCounts.completed}/{taskCounts.total} tasks
-            today
-          </Text>
-        </View>
-      </Animated.View>
-    );
-  };
-
   const handleEndEditing = async () => {
     Vibration.vibrate(50);
     if (editingTask) {
-        await setTasks((prevTasks) => {
-            const updatedTasks = {
-                ...prevTasks,
-                [selectedDay]: prevTasks[selectedDay].map((task) =>
-                    task.id === editingTask.id ? { ...task, ...editingTask } : task
-                ),
-            };
-            // Save the updated tasks to AsyncStorage
-            saveTasks(updatedTasks);
-            return updatedTasks;
-        });
-        setEditingTask(null);
+      await setTasks((prevTasks) => {
+        const updatedTasks = {
+          ...prevTasks,
+          [selectedDay]: prevTasks[selectedDay].map((task) =>
+            task.id === editingTask.id ? { ...task, ...editingTask } : task
+          ),
+        };
+        saveTasks(updatedTasks);
+        return updatedTasks;
+      });
+      setEditingTask(null);
     }
-};
-
+  };
 
   useEffect(() => {
     async function loadFonts() {
@@ -404,214 +422,189 @@ const HomeScreen = ({ route }) => {
 
   return (
     <SplashScreen>
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.hello}>Hello Aditya,</Text>
-        <TouchableOpacity
-          onPress={() => {
-            Vibration.vibrate(50);
-            navigation.navigate("VoiceAssistant");
-          }}
-        >
-          <Ionicons
-            name="add"
-            size={24}
-            color="#FFFFFF"
-            style={styles.plusButton}
-          />
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.greeting}>Your task today is almost complete!</Text>
-
-      {/* Days Bar */}
-      <View style={{ height: 90 }}>
-        <ScrollView
-          horizontal
-          style={styles.daysScroll}
-          showsHorizontalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {days.map((day, index) => (
-            <TouchableOpacity
-              key={index}
-              onPress={() => {
-                Vibration.vibrate(50);
-                setSelectedDay(
-                  formatDate(
-                    new Date(today.getFullYear(), today.getMonth(), day.date)
-                  )
-                );
-              }}
-            >
-              <View
-                style={[
-                  styles.dayContainer,
-                  selectedDay ===
-                  formatDate(
-                    new Date(today.getFullYear(), today.getMonth(), day.date)
-                  )
-                    ? styles.selectedDayContainer
-                    : styles.unselectedDayContainer,
-                ]}
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.hello}>Hello Aditya,</Text>
+          <TouchableOpacity
+            onPress={() => {
+              Vibration.vibrate(50);
+              navigation.navigate("VoiceAssistant");
+            }}
+          >
+            <Ionicons name="add" size={24} color="#FFFFFF" style={styles.plusButton} />
+          </TouchableOpacity>
+        </View>
+        <Animated.Text style={[styles.greeting, { opacity: fadeAnim }]}>{message}</Animated.Text>
+        <View style={{ height: 90 }}>
+          <ScrollView
+            horizontal
+            style={styles.daysScroll}
+            showsHorizontalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+          >
+            {days.map((day, index) => (
+              <TouchableOpacity
+                key={index}
+                onPress={() => {
+                  Vibration.vibrate(50);
+                  setSelectedDay(
+                    formatDate(new Date(today.getFullYear(), today.getMonth(), day.date))
+                  );
+                }}
               >
-                <Text
+                <View
                   style={[
-                    styles.day,
-                    selectedDay ===
-                    formatDate(
-                      new Date(today.getFullYear(), today.getMonth(), day.date)
-                    )
-                      ? styles.selectedDayText
-                      : styles.unselectedDayText,
+                    styles.dayContainer,
+                    selectedDay === formatDate(new Date(today.getFullYear(), today.getMonth(), day.date))
+                      ? styles.selectedDayContainer
+                      : styles.unselectedDayContainer,
                   ]}
                 >
-                  {day.date}
-                </Text>
-                <Text style={styles.dayLabel}>{day.weekday}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Task Cards */}
-      {/* Task Cards */}
-      <ScrollView style={styles.cardsContainer}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-          <View>
-            {(tasks[selectedDay] || []).map((task, index) => {
-              const borderColor = getAnimatedValue(task.id).interpolate({
-                inputRange: [0, 1],
-                outputRange: ["white", "#87FF21"],
-              });
-              const timeLeft = calculateTimeLeft(task.startTime, selectedDay);
-              const isTimeMissed = timeLeft === "Incomplete";
-              const isInProgress = timeLeft === "In Progress";
-              return (
-                <Animated.View
-                  key={index}
-                  style={[
-                    styles.taskCard,
-                    { borderColor: borderColor, borderWidth: 0.5 },
-                  ]}
-                >
-                  <View style={styles.taskHeader}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Vibration.vibrate(50);
-                        setCurrentTaskId(task.id);
-                        setShowTimePicker(true);
-                      }}
-                      style={styles.startTimeContainer}
-                    >
-                      <Text style={styles.taskStart}>{task.startTime}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => handleRemoveTask(selectedDay, task.id)}
-                    >
-                      <Ionicons name="close" size={20} color="#FF6347" />
-                    </TouchableOpacity>
-                  </View>
-                  {editingTask && editingTask.id === task.id ? (
-                    <TextInput
-                      style={[styles.taskTitle, styles.taskTitleInput]}
-                      value={editingTask.title}
-                      onChangeText={(text) =>
-                        setEditingTask((prevTask) => ({
-                          ...prevTask,
-                          title: text,
-                        }))
-                      }
-                      onBlur={handleEndEditing}
-                      onSubmitEditing={handleEndEditing}
-                      multiline={true}
-                      blurOnSubmit={false}
-                      returnKeyType="done"
-                    />
-                  ) : (
-                    <Text
-                      style={styles.taskTitle}
-                      onLongPress={() => {
-                        Vibration.vibrate(50);
-                        setEditingTask(task);
-                      }}
-                    >
-                      {task.title}
-                    </Text>
-                  )}
-
-                  {editingTask && editingTask.id === task.id ? (
-                    <TextInput
-                      style={[styles.taskSubtitle, styles.taskSubtitleInput]}
-                      value={editingTask.subtitle}
-                      onChangeText={(text) =>
-                        setEditingTask((prevTask) => ({
-                          ...prevTask,
-                          subtitle: text,
-                        }))
-                      }
-                      onBlur={handleEndEditing}
-                      onSubmitEditing={handleEndEditing}
-                      multiline={true}
-                      blurOnSubmit={false}
-                      returnKeyType="done"
-                    />
-                  ) : (
-                    <Text
-                      style={styles.taskSubtitle}
-                      onLongPress={() => {
-                        Vibration.vibrate(50);
-                        setEditingTask(task);
-                      }}
-                    >
-                      {task.subtitle}
-                    </Text>
-                  )}
-
-                  <View style={styles.taskDetails}>
-                    <Text
-                      style={[
-                        styles.taskTime,
-                        isTimeMissed
-                          ? styles.taskTimeMissed
-                          : isInProgress
-                          ? styles.taskTimeInProgress
-                          : styles.taskTimeLeft,
-                      ]}
-                    >
-                      {timeLeft}
-                    </Text>
-
-                    {/* Done Button */}
-                    <TouchableOpacity
-                      style={[
-                        styles.doneButton,
-                        task.done ? styles.doneButtonGreen : {},
-                      ]}
-                      onPress={() => handleMarkDone(selectedDay, task.id)}
-                    >
-                      <Text style={styles.doneButtonText}>
-                        {task.done ? "Undo" : "Done"}
+                  <Text
+                    style={[
+                      styles.day,
+                      selectedDay === formatDate(new Date(today.getFullYear(), today.getMonth(), day.date))
+                        ? styles.selectedDayText
+                        : styles.unselectedDayText,
+                    ]}
+                  >
+                    {day.date}
+                  </Text>
+                  <Text style={styles.dayLabel}>{day.weekday}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+        <ScrollView style={styles.cardsContainer}>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View>
+              {(tasks[selectedDay] || []).map((task, index) => {
+                const borderColor = getAnimatedValue(task.id).interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["white", "#87FF21"],
+                });
+                const timeLeft = calculateTimeLeft(task.startTime, selectedDay, task.done);
+                const isCompleted = timeLeft === "Completed";
+                const isTimeMissed = timeLeft === "Incomplete";
+                const isInProgress = timeLeft === "In Progress";
+                return (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.taskCard,
+                      { borderColor: borderColor, borderWidth: 0.5 },
+                    ]}
+                  >
+                    <View style={styles.taskHeader}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          Vibration.vibrate(50);
+                          setCurrentTaskId(task.id);
+                          setShowTimePicker(true);
+                        }}
+                        style={styles.startTimeContainer}
+                      >
+                        <Text style={styles.taskStart}>{task.startTime}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleRemoveTask(selectedDay, task.id)}
+                      >
+                        <Ionicons name="close" size={20} color="#FF6347" />
+                      </TouchableOpacity>
+                    </View>
+                    {editingTask && editingTask.id === task.id ? (
+                      <TextInput
+                        style={[styles.taskTitle, styles.taskTitleInput]}
+                        value={editingTask.title}
+                        onChangeText={(text) =>
+                          setEditingTask((prevTask) => ({
+                            ...prevTask,
+                            title: text,
+                          }))
+                        }
+                        onBlur={handleEndEditing}
+                        onSubmitEditing={handleEndEditing}
+                        multiline={true}
+                        blurOnSubmit={false}
+                        returnKeyType="done"
+                      />
+                    ) : (
+                      <Text
+                        style={styles.taskTitle}
+                        onLongPress={() => {
+                          Vibration.vibrate(50);
+                          setEditingTask(task);
+                        }}
+                      >
+                        {task.title}
                       </Text>
-                    </TouchableOpacity>
-                  </View>
-                </Animated.View>
-              );
-            })}
-          </View>
-        </TouchableWithoutFeedback>
-      </ScrollView>
-      <TaskCompletionDialog
-        visible={showDialog}
-        onClose={() => setShowDialog(false)}
-        taskCounts={taskCounts}
-      />
-      {renderTimePicker()}
-    </View>
+                    )}
+                    {editingTask && editingTask.id === task.id ? (
+                      <TextInput
+                        style={[styles.taskSubtitle, styles.taskSubtitleInput]}
+                        value={editingTask.subtitle}
+                        onChangeText={(text) =>
+                          setEditingTask((prevTask) => ({
+                            ...prevTask,
+                            subtitle: text,
+                          }))
+                        }
+                        onBlur={handleEndEditing}
+                        onSubmitEditing={handleEndEditing}
+                        multiline={true}
+                        blurOnSubmit={false}
+                        returnKeyType="done"
+                      />
+                    ) : (
+                      <Text
+                        style={styles.taskSubtitle}
+                        onLongPress={() => {
+                          Vibration.vibrate(50);
+                          setEditingTask(task);
+                        }}
+                      >
+                        {task.subtitle}
+                      </Text>
+                    )}
+                    <View style={styles.taskDetails}>
+                      <Text
+                        style={[
+                          styles.taskTime,
+                          isCompleted
+                            ? styles.taskTimeCompleted
+                            : isTimeMissed
+                            ? styles.taskTimeMissed
+                            : isInProgress
+                            ? styles.taskTimeInProgress
+                            : styles.taskTimeLeft,
+                        ]}
+                      >
+                        {timeLeft}
+                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.doneButton,
+                          task.done ? styles.doneButtonGreen : {},
+                        ]}
+                        onPress={() => handleMarkDone(selectedDay, task.id)}
+                      >
+                        <Text style={styles.doneButtonText}>
+                          {task.done ? "Undo" : "Done"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          </TouchableWithoutFeedback>
+        </ScrollView>
+        {renderTimePicker()}
+      </View>
     </SplashScreen>
   );
 };
@@ -621,7 +614,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
     paddingHorizontal: 16,
-    paddingTop: 30,
+    paddingTop: 40,
   },
   header: {
     flexDirection: "row",
@@ -714,11 +707,12 @@ const styles = StyleSheet.create({
   },
   hello: {
     color: "#888888",
-    fontSize: 14,
+    fontSize: 18,
+    marginBottom: -10,
     fontFamily: "Mona-Sans",
   },
   plusButton: {
-    padding: 10,
+    padding: 8,
     backgroundColor: "#444444",
     borderRadius: 100,
   },
@@ -739,47 +733,32 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 20,
   },
-  taskTime: {
-    fontSize: 14,
-    fontFamily: "Mona-Sans",
-  },
   taskTimeLeft: {
     color: "#FFFF00",
   },
   taskTimeMissed: {
     color: "#FF6347",
   },
+  taskTimeCompleted: {
+    color: "#87FF21",
+  },
   taskTimeInProgress: {
     color: "#FFFFFF",
-  },
-
-  dialogContainer: {
-    position: "absolute",
-    justifyContent: "center",
-    alignItems: "center",
-    top: 15,
-    left: 0,
-    right: 0,
-  },
-  dialog: {
-    backgroundColor: "#000",
-    padding: 3,
-    borderRadius: 100,
-    width: "80%",
-    alignItems: "center",
-    borderWidth: 0.4,
-    borderColor: "#fff",
-  },
-  dialogMessage: {
-    fontSize: 14,
-    marginVertical: 15,
-    color: "#fff",
   },
   taskTitleInput: {
     borderBottomWidth: 1,
   },
   taskSubtitleInput: {
     borderBottomWidth: 1,
+  },
+  customHeader: {
+    backgroundColor: "#000",
+    padding: 10,
+  },
+  customHeaderText: {
+    color: "#FFF",
+    fontFamily: "Mona-Sans-Bold",
+    textAlign: "center",
   },
 });
 
